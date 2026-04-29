@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block content %}
+<h1 class="text-xl font-semibold mb-4">История анализов</h1>
+<ul class="space-y-2">
+  {% for i in items %}
+    <li class="bg-white p-3 rounded shadow">
+      <a class="underline" href=" {% url 'derm:derm_history' %} " class="font-medium hover:underline">
+        {{ i.created_at|date:"Y-m-d H:i" }} — {{ i.result_label }} ({{ i.confidence|floatformat:2 }})
+      </a>
+    </li>
+  {% empty %}
+    <li>Пока пусто.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

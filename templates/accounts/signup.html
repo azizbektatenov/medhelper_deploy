@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% load widget_tweaks %}
+
+{% block title %}Регистрация{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-5">Регистрация</h1>
+
+<form method="post" class="card shadow-soft max-w-md space-y-4">
+  {% csrf_token %}
+  {{ form.non_field_errors }}
+
+  <label class="block text-sm text-slate-600 mb-1">Имя пользователя</label>
+  {{ form.username|add_class:"w-full border rounded-lg px-3 py-2" }}
+
+  <label class="block text-sm text-slate-600 mb-1">Пароль</label>
+  {{ form.password1|add_class:"w-full border rounded-lg px-3 py-2" }}
+
+  <label class="block text-sm text-slate-600 mb-1">Подтверждение пароля</label>
+  {{ form.password2|add_class:"w-full border rounded-lg px-3 py-2" }}
+
+  <button class="brand-btn px-4 py-2 rounded-lg">Зарегистрироваться</button>
+  <p class="text-sm text-slate-600 mt-2">
+    Уже есть аккаунт? <a class="underline" href="{% url 'accounts:login' %}">Войти</a>
+  </p>
+</form>
+{% endblock %}

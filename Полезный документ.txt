@@ -1,0 +1,3 @@
+OPENROUTER_API_KEY = "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"
+
+Запустить вируталку .\.venv\Scripts\Activate.ps1

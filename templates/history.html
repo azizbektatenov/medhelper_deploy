@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}История{% endblock %}
+{% block content %}
+
+<h1 class="text-2xl font-semibold mb-5">История</h1>
+
+<div class="grid gap-6 md:grid-cols-2">
+  <!-- Симптом-чекер -->
+  <div class="card shadow-soft">
+    <div class="flex items-center justify-between mb-3">
+      <div class="font-semibold">Симптом-чекер</div>
+      <span class="px-2 py-1 rounded-full brand-badge text-xs">последние записи</span>
+    </div>
+
+    {% if triage %}
+      {% for i in triage %}
+        <div class="history-row">
+          <div class="history-main">
+            <div class="text-sm text-slate-500">
+              {{ i.obj.created_at|date:"Y-m-d H:i" }}
+            </div>
+            <div class="font-medium mt-0.5">
+              {{ i.obj.sex }}, {{ i.obj.age }} лет
+            </div>
+            <div class="text-sm text-slate-600 mt-0.5">
+              {{ i.obj.symptoms|truncatechars:80 }}
+            </div>
+
+            {% if i.urgency_level %}
+              <div class="mt-1">
+                {% if i.urgency_level == "emergency" %}
+                  <span class="badge" style="background:#fee2e2;color:#991b1b;">
+                    🚨 Высокая срочность
+                  </span>
+                {% elif i.urgency_level == "urgent" %}
+                  <span class="badge" style="background:#fef3c7;color:#92400e;">
+                    ⚠️ Срочно
+                  </span>
+                {% else %}
+                  <span class="badge" style="background:#dcfce7;color:#166534;">
+                    ✅ Без признаков неотложности
+                  </span>
+                {% endif %}
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="history-actions">
+            <a href="{% url 'triage:triage_detail' i.obj.id %}"
+               class="btn btn-ghost"
+               style="min-width:110px;">
+              Открыть
+            </a>
+
+            <form method="post"
+                  action="{% url 'triage:triage_delete' i.obj.id %}">
+              {% csrf_token %}
+              <button type="submit"
+                      class="btn btn-outline btn-danger"
+                      style="min-width:110px;"
+                      onclick="return confirm('Удалить эту запись симптом-чекера?');">
+                Удалить
+              </button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+
+      <a href="{% url 'triage:triage_history' %}"
+         class="inline-block mt-4 underline hover:text-emerald-600">
+        Вся история симптомов →
+      </a>
+    {% else %}
+      <div class="text-slate-500 mt-2">Пока нет записей.</div>
+    {% endif %}
+  </div>
+
+  <!-- Анализ кожи -->
+  <div class="card shadow-soft">
+    <div class="flex items-center justify-between mb-3">
+      <div class="font-semibold">Анализ кожи</div>
+      <span class="px-2 py-1 rounded-full brand-badge text-xs">последние записи</span>
+    </div>
+
+    {% if derm %}
+      {% for d in derm %}
+
+      <div class="history-row">
+
+        <!-- Мини-превью фото -->
+        <div style="width:70px; flex-shrink:0;">
+          {% if d.obj.image %}
+            <img
+              src="{{ d.obj.image.url }}"
+              alt="Фото"
+              style="
+                width:70px;
+                height:70px;
+                object-fit:cover;
+                border-radius:12px;
+                border:1px solid #e0e0e0;
+              "
+            >
+          {% else %}
+            <div style="
+              width:70px;height:70px;
+              border-radius:12px;
+              background:#f1f5f9;
+              display:flex;align-items:center;justify-content:center;
+              font-size:12px;color:#94a3b8;">
+              Нет фото
+            </div>
+          {% endif %}
+        </div>
+
+        <!-- Основная информация -->
+        <div class="history-main">
+
+          <div class="text-sm text-slate-500">
+            {{ d.obj.created_at|date:"Y-m-d H:i" }}
+          </div>
+
+          <div class="mt-1">
+            <span class="font-semibold">Диагноз:</span>
+            <span style="
+              padding:4px 10px;
+              background:#ecfdf3;
+              color:#15803d;
+              border-radius:999px;
+              font-size:12px;
+              margin-left:6px;
+            ">
+              {{ d.obj.result_label|default:"—" }}
+            </span>
+          </div>
+
+          <div class="text-sm text-slate-600 mt-1">
+            Уверенность: {{ d.obj.confidence|floatformat:2 }}
+          </div>
+        </div>
+
+        <!-- Кнопки -->
+        <div class="history-actions">
+          <a href="{% url 'derm:derm_detail' d.obj.id %}"
+             class="btn btn-ghost"
+             style="min-width:110px;">
+            Открыть
+          </a>
+
+          <form method="post"
+                action="{% url 'derm:derm_delete' d.obj.id %}">
+            {% csrf_token %}
+            <button type="submit"
+                    class="btn btn-outline btn-danger"
+                    style="min-width:110px;"
+                    onclick="return confirm('Удалить запись анализа кожи?');">
+              Удалить
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {% endfor %}
+
+      <a href="{% url 'derm:derm_history' %}"
+         class="inline-block mt-4 underline hover:text-emerald-600">
+        Вся история фото →
+      </a>
+
+    {% else %}
+      <div class="text-slate-500 mt-2">Пока нет записей.</div>
+    {% endif %}
+
+  </div>
+
+
+{% endblock %}

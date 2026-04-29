@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Анализ кожи{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-5">Анализ кожи</h1>
+
+<div class="card shadow-soft p-6">
+  <form action="{% url 'derm:derm_form' %}" method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+
+  <div class="form-grid" style="row-gap: 16px;">
+    <div>
+      <label class="block text-sm text-slate-600 mb-1">Фото участка кожи</label>
+      <input
+        type="file"
+        name="image"
+        accept="image/*"
+        required
+        style="
+          width:100%;
+          padding:8px 10px;
+          border-radius:12px;
+          border:1px solid #e6e8eb;
+          background:#f9fafb;
+        "
+      >
+      <p class="text-xs text-slate-500 mt-1">
+        Загрузите чёткое фото участка кожи при хорошем освещении.
+        Допустимые форматы: JPG, PNG.
+      </p>
+    </div>
+  </div>
+
+  <div class="mt-4 flex items-center justify-between gap-3">
+    <p class="text-xs text-slate-500">
+      Анализ носит ориентировочный характер и не заменяет очный осмотр врача-дерматолога.
+    </p>
+    <button class="btn btn-primary">
+      Анализировать
+    </button>
+  </div>
+</form>
+  </div>
+{% endblock %}

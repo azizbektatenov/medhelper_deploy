@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block content %}
+<h1 class="text-xl font-semibold mb-4">История консультаций</h1>
+<ul class="space-y-2">
+  {% for i in items %}
+    <li class="bg-white p-3 rounded shadow">
+      <a href="{% url 'triage:triage_detail' i.id %}" class="font-medium hover:underline">
+        {{ i.created_at|date:"Y-m-d H:i" }} — {{ i.sex }}, {{ i.age }} лет
+      </a>
+      <div class="text-gray-600 text-sm truncate">{{ i.symptoms }}</div>
+    </li>
+  {% empty %}
+    <li>Пока пусто.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Профиль пользователя{% endblock %}
+{% block content %}
+
+<style>
+  /* Сетка профиля */
+  .profile-form-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+    column-gap: 24px;
+    row-gap: 14px;
+  }
+
+  /* Подписи слева */
+  .profile-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #6b7280;
+    padding-top: 10px;
+  }
+
+  /* Поля справа */
+  .profile-field {
+    padding-top: 4px;
+  }
+
+  /* Красивые инпуты / селекты / текстовые поля */
+  .profile-field input[type="text"],
+  .profile-field input[type="number"],
+  .profile-field select,
+  .profile-field textarea {
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid #d1d5db;
+    background-color: #f9fafb;
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    color: #111827;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease,
+                background-color 0.15s ease;
+  }
+
+  .profile-field textarea {
+    min-height: 70px;
+    resize: vertical;
+  }
+
+  .profile-field input[type="text"]:focus,
+  .profile-field input[type="number"]:focus,
+  .profile-field select:focus,
+  .profile-field textarea:focus {
+    border-color: #10b981;
+    box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.18);
+    background-color: #ffffff;
+  }
+
+  /* Подписи-пояснения под полями */
+  .profile-hint {
+    font-size: 0.75rem;
+    color: #6b7280;
+  }
+</style>
+
+<h1 class="text-3xl font-semibold mb-8">Профиль</h1>
+
+<form method="post"
+      class="card form-narrow max-w-4xl mx-auto px-6 py-6 md:px-8 md:py-8 shadow-soft">
+  {% csrf_token %}
+
+
+  <!-- ЛИЧНЫЕ ДАННЫЕ -->
+<div class="border-t border-slate-200 pt-5">
+  <h2 class="mb-4 text-xl font-bold text-slate-900">
+    Личные данные
+  </h2>
+
+
+
+    <div class="profile-form-grid">
+
+      <!-- Имя -->
+      <div class="profile-label">
+        Ваше имя
+      </div>
+      <div class="profile-field">
+        {{ form.full_name }}
+      </div>
+
+      <!-- Пол -->
+      <div class="profile-label">Пол</div>
+      <div class="profile-field">
+        {{ form.sex }}
+      </div>
+
+      <!-- Возраст -->
+      <div class="profile-label">Возраст</div>
+      <div class="profile-field">
+        {{ form.age }}
+      </div>
+
+      <!-- Рост -->
+      <div class="profile-label">Рост (см)</div>
+      <div class="profile-field">
+        {{ form.height_cm }}
+      </div>
+
+      <!-- Вес + ИМТ -->
+      <div class="profile-label">Вес (кг)</div>
+      <div class="profile-field">
+        {{ form.weight_kg }}
+        {% if bmi %}
+          <p class="profile-hint mt-1">
+            Примерный ИМТ: {{ bmi|floatformat:1 }}
+          </p>
+        {% endif %}
+      </div>
+
+      <!-- Курение -->
+      <div class="profile-label">Курение</div>
+      <div class="profile-field">
+        <label class="text-sm text-slate-700 flex items-center gap-2">
+          {{ form.smoker }}
+          <span>Курю</span>
+        </label>
+      </div>
+
+      <!-- Беременность -->
+      <div class="profile-label">Беременность</div>
+      <div class="profile-field">
+        <label class="text-sm text-slate-700 flex items-center gap-2">
+          {{ form.pregnant }}
+          <span>Беременность (актуально только для женщин)</span>
+        </label>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- МЕДИЦИНСКАЯ ИНФОРМАЦИЯ -->
+<div class="border-t border-slate-200 pt-6 mt-6">
+  <h2 class="mb-4 text-xl font-bold text-slate-900">
+    Медицинская информация
+  </h2>
+
+
+
+    <div class="profile-form-grid">
+
+      <!-- Аллергии -->
+      <div class="profile-label">Аллергии</div>
+      <div class="profile-field">
+        {{ form.allergies }}
+      </div>
+
+      <!-- Противопоказания -->
+      <div class="profile-label">Противопоказания к лекарствам</div>
+      <div class="profile-field">
+        {{ form.contraindications }}
+      </div>
+
+      <!-- Хронические заболевания -->
+      <div class="profile-label">Хронические заболевания</div>
+      <div class="profile-field">
+        {{ form.chronic }}
+      </div>
+
+      <!-- Препараты -->
+      <div class="profile-label">Постоянно принимаемые препараты</div>
+      <div class="profile-field">
+        {{ form.meds }}
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Низ карточки -->
+  <div class="mt-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+    <p class="profile-hint max-w-xl">
+      Эти данные используются только для персонализации рекомендаций и не видны другим пользователям.
+    </p>
+    <button class="btn btn-primary px-6">
+      Сохранить
+    </button>
+  </div>
+</form>
+
+{% endblock %}

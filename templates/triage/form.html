@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Симптом-чекер{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-5">Симптом-чекер</h1>
+
+<form method="post" class="card form-narrow">
+  {% csrf_token %}
+  <div class="form-grid" style="row-gap: 16px;">
+
+    <div>
+      <label class="block text-sm text-slate-600 mb-1">Пол</label>
+      <select
+        name="sex"
+        required
+        style="
+          width:100%;
+          padding:8px 10px;
+          border-radius:12px;
+          border:1px solid #e6e8eb;
+          background:#fff;
+        "
+      >
+        <option value="">Выберите</option>
+        <option value="мужской">Мужской</option>
+        <option value="женский">Женский</option>
+        <option value="не указан">Предпочитаю не указывать</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="block text-sm text-slate-600 mb-1">Возраст</label>
+      <input
+        type="number"
+        name="age"
+        min="0"
+        max="120"
+        required
+        style="
+          width:100%;
+          padding:8px 10px;
+          border-radius:12px;
+          border:1px solid #e6e8eb;
+        "
+      >
+    </div>
+
+    <div>
+      <label class="block text-sm text-slate-600 mb-1">Опишите симптомы</label>
+      <textarea
+        name="symptoms"
+        rows="5"
+        required
+        placeholder="Например: температура, кашель, боль в груди, слабость…"
+        style="
+          width:100%;
+          padding:8px 10px;
+          border-radius:12px;
+          border:1px solid #e6e8eb;
+          resize:vertical;
+        "
+      ></textarea>
+    </div>
+  </div>
+
+  <div class="mt-4">
+    <button class="btn btn-primary">Анализировать</button>
+  </div>
+</form>
+{% endblock %}

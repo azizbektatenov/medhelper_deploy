@@ -1,0 +1,347 @@
+{% extends "base.html" %}
+{% block title %}Результат анализа кожи{% endblock %}
+{% block content %}
+
+<h1 class="text-2xl font-semibold mb-5">Результат анализа</h1>
+
+<div class="card shadow-soft">
+  <!-- Шапка карточки -->
+  <div class="flex items-center justify-between mb-4">
+    <span class="text-sm text-slate-500">
+      {{ obj.created_at|date:"Y-m-d H:i" }}
+    </span>
+    <span class="px-2.5 py-1 rounded-full brand-badge text-xs font-medium">
+      Анализ кожи
+    </span>
+  </div>
+
+  <div class="grid gap-6" style="align-items:flex-start;">
+
+    <!-- ЛЕВАЯ КОЛОНКА: ФОТО -->
+    <div>
+      {% if obj.image %}
+        {% if heatmap_url %}
+          <div class="flex gap-2 mb-3">
+            <button type="button" class="btn btn-ghost" onclick="showDermImage('orig')">
+              Оригинал
+            </button>
+            <button type="button" class="btn btn-ghost" onclick="showDermImage('heatmap')">
+              Тепловая карта
+            </button>
+          </div>
+        {% endif %}
+
+        <div style="display:flex;justify-content:center;">
+          <img
+            id="derm-img-orig"
+            src="{{ obj.image.url }}"
+            alt="Фото участка кожи"
+            style="
+              max-width:100%;
+              max-height:380px;
+              border-radius:20px;
+              border:1px solid #e5e7eb;
+              background:#f9fafb;
+              object-fit:contain;
+              display:block;
+            "
+          />
+          {% if heatmap_url %}
+            <img
+              id="derm-img-heatmap"
+              src="{{ heatmap_url }}"
+              alt="Тепловая карта"
+              style="
+                max-width:100%;
+                max-height:380px;
+                border-radius:20px;
+                border:1px solid #e5e7eb;
+                background:#f9fafb;
+                object-fit:contain;
+                display:none;
+              "
+            />
+          {% endif %}
+        </div>
+      {% else %}
+        <div class="text-sm text-slate-500">Фото не найдено.</div>
+      {% endif %}
+    </div>
+
+    <!-- ПРАВАЯ КОЛОНКА: ТЕКСТ -->
+    <div style="display:flex;flex-direction:column;gap:16px;">
+
+      <!-- Основной диагноз + риск -->
+      <div>
+        <div class="summary-strip">
+          <div>
+            <div class="summary-label">Основной диагноз (по модели)</div>
+            <div class="summary-value">{{ main_name }}</div>
+          </div>
+
+          <div>
+            <div class="summary-label">Уверенность модели</div>
+            <div class="summary-value">
+              {% if main_conf_percent %}
+                {{ main_conf_percent }}%
+              {% else %}
+                —
+              {% endif %}
+            </div>
+          </div>
+
+          <div>
+            <div class="summary-label">Уровень риска</div>
+            <div class="summary-value">
+              {% if overall_risk and overall_risk.risk_label %}
+                {{ overall_risk.risk_label }}
+              {% else %}
+                Нет оценки риска
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TOP-3 диагнозов -->
+      {% if top_preds %}
+        <div class="section-block">
+          <div class="section-title">Возможные диагнозы (TOP-3 по модели)</div>
+          <ul class="list-disc pl-5 space-y-1 text-sm">
+            {% for p in top_preds %}
+              <li>
+                <span class="font-medium">{{ p.name }}</span>
+                — примерно {{ p.percent|floatformat:2 }}%
+                {% if p.risk_label %}
+                  <span class="text-xs text-slate-500 ml-1">({{ p.risk_label }})</span>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+          <p class="text-xs text-slate-500 mt-1">
+            Оценки основаны на обучении модели на датасете HAM10000 и не заменяют очный осмотр врача.
+          </p>
+        </div>
+      {% endif %}
+
+      <!-- ПЛАН ДЕЙСТВИЙ ОТ AI – КРАСИВАЯ ПЛАШКА -->
+      {% if plan %}
+        <div class="section-block">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <h2 class="section-title" style="margin:0;">План действий (AI MedHelper)</h2>
+            <span style="
+              display:inline-flex;
+              align-items:center;
+              border-radius:999px;
+              background:#ecfdf5;
+              padding:2px 8px;
+              font-size:11px;
+              font-weight:500;
+              color:#047857;
+            ">
+              Рекомендации на основе модели
+            </span>
+          </div>
+
+          <!-- Основная карточка -->
+          <div
+            style="
+              border-radius:18px;
+              border:1px solid #e5e7eb;
+              background:linear-gradient(135deg,#f9fafb,#f5f3ff);
+              padding:18px 20px;
+              display:flex;
+              flex-direction:column;
+              gap:18px;
+            "
+          >
+
+            <!-- Синдром и заболевания в две строки -->
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <div>
+                <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#6b7280;">
+                  Синдром
+                </div>
+                <p style="margin:4px 0 0;font-size:14px;color:#111827;">
+                  {{ plan.syndrome }}
+                </p>
+              </div>
+
+              <div>
+                <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#6b7280;">
+                  Возможные заболевания
+                </div>
+                <p style="margin:4px 0 0;font-size:14px;color:#111827;">
+                  {{ plan.diseases }}
+                </p>
+              </div>
+            </div>
+
+            <!-- Три карточки плана -->
+            <div>
+              <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#6b7280;margin-bottom:6px;">
+                План действий
+              </div>
+
+              <div
+                style="
+                  display:grid;
+                  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+                  gap:12px;
+                "
+              >
+                <!-- Обследования -->
+                <div
+                  style="
+                    border-radius:14px;
+                    background:#fff;
+                    border:1px solid #e5e7eb;
+                    padding:10px 12px;
+                  "
+                >
+                  <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#6b7280;margin-bottom:4px;">
+                    Обследования
+                  </div>
+                  <p style="margin:0;font-size:13px;line-height:1.35;color:#111827;">
+                    {{ plan.actions.exam }}
+                  </p>
+                </div>
+
+                <!-- К кому обратиться -->
+                <div
+                  style="
+                    border-radius:14px;
+                    background:#fff;
+                    border:1px solid #e5e7eb;
+                    padding:10px 12px;
+                  "
+                >
+                  <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#6b7280;margin-bottom:4px;">
+                    К кому обратиться и когда
+                  </div>
+                  <p style="margin:0;font-size:13px;line-height:1.35;color:#111827;">
+                    {{ plan.actions.doctor }}
+                  </p>
+                </div>
+
+                <!-- Лечение -->
+                <div
+                  style="
+                    border-radius:14px;
+                    background:#fff;
+                    border:1px solid #e5e7eb;
+                    padding:10px 12px;
+                  "
+                >
+                  <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:#6b7280;margin-bottom:4px;">
+                    Общие подходы к лечению
+                  </div>
+                  <p style="margin:0;font-size:13px;line-height:1.35;color:#111827;">
+                    {{ plan.actions.treatment }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Красные флаги и чего нельзя делать: две цветные карточки -->
+            <div
+              style="
+                display:grid;
+                grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+                gap:12px;
+              "
+            >
+              <!-- Красные флаги -->
+              <div
+                style="
+                  border-radius:16px;
+                  background:#fef2f2;
+                  border:1px solid #fecaca;
+                  padding:10px 12px;
+                "
+              >
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#b91c1c;margin-bottom:4px;">
+                  Красные флаги
+                </div>
+                <p style="margin:0;font-size:13px;line-height:1.35;color:#7f1d1d;">
+                  {{ plan.red_flags }}
+                </p>
+              </div>
+
+              <!-- Чего нельзя делать -->
+              <div
+                style="
+                  border-radius:16px;
+                  background:#fffbeb;
+                  border:1px solid #fed7aa;
+                  padding:10px 12px;
+                "
+              >
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#92400e;margin-bottom:4px;">
+                  Чего нельзя делать
+                </div>
+                <p style="margin:0;font-size:13px;line-height:1.35;color:#78350f;">
+                  {{ plan.donts }}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <p class="text-xs text-slate-500 mt-2">
+            Ответ сформирован AI MedHelper на основе описания диагноза. Не является окончательным диагнозом
+            или медицинским назначением. Обязательно обратитесь к врачу.
+          </p>
+        </div>
+
+      {% elif treatment_plan %}
+        {# fallback, если парсер не сработал #}
+        <div class="section-block">
+          <div class="section-title">План действий (AI MedHelper)</div>
+          <div
+            style="
+              margin-top:8px;
+              border-radius:14px;
+              border:1px solid #e5e7eb;
+              background:#ffffff;
+              padding:12px 14px;
+              font-size:14px;
+              color:#111827;
+              white-space:pre-line;
+            "
+          >
+            {{ treatment_plan }}
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- ДИСКЛЕЙМЕР -->
+      <div class="section-block">
+        <div class="section-title">Важно помнить</div>
+        <p class="text-sm text-slate-600">
+          Результат анализа носит ориентировочный характер и не является диагнозом.
+          При изменении размера, формы, цвета или появлении зуда/кровоточивости — обратитесь к дерматологу.
+        </p>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<a href="{% url 'derm:derm_history' %}"
+   class="inline-block mt-6 underline hover:text-emerald-600">
+  ← К истории
+</a>
+
+{% if obj.image and heatmap_url %}
+<script>
+  function showDermImage(which) {
+    const orig = document.getElementById('derm-img-orig');
+    const heat = document.getElementById('derm-img-heatmap');
+    if (!orig || !heat) return;
+    orig.style.display = (which === 'orig') ? 'block' : 'none';
+    heat.style.display = (which === 'heatmap') ? 'block' : 'none';
+  }
+</script>
+{% endif %}
+
+{% endblock %}

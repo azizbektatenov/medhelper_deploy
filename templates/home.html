@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Medora{% endblock %}
+
+{% block content %}
+  <section class="hero">
+    <h1 class="h1">Онлайн медицинский помощник</h1>
+    <p class="muted">Для первичной ориентировки по симптомам и фото кожи. Не заменяет очный приём врача.</p>
+  </section>
+
+  <!-- Верхние 3 карточки-преимущества -->
+  <section class="grid grid-3" style="margin:18px 0 26px">
+    <div class="card">
+      <div class="title">Быстро</div>
+      <p class="desc">Ответ за секунды без сложных форм.</p>
+    </div>
+    <div class="card">
+      <div class="title">Минимализм</div>
+      <p class="desc">Чистый интерфейс, только главное.</p>
+    </div>
+    <div class="card">
+      <div class="title">История</div>
+      <p class="desc">Сохраняйте и возвращайтесь к результатам.</p>
+    </div>
+  </section>
+
+  <!-- Две основные карточки сервисов -->
+  <section class="grid grid-2" style="margin-bottom:36px">
+    <div class="card">
+      <span class="badge">Сервис · быстрый опрос</span>
+      <div class="title">Симптом-чекер</div>
+      <p class="desc">Опишите пол, возраст и симптомы — получите рекомендации.</p>
+      <div class="cta">
+        <a href="{% url 'triage:triage_form' %}" class="btn btn-brand">Открыть</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <span class="badge">Сервис · классификация фото</span>
+      <div class="title">Анализ кожи</div>
+      <p class="desc">Загрузите фото — получите вероятный класс и уверенность.</p>
+      <div class="cta">
+        <a href="{% url 'derm:derm_form' %}" class="btn btn-brand">Открыть</a>
+      </div>
+    </div>
+  </section>
+
+  <p class="muted" style="margin:24px 0 60px">© МедПомощник. Не является медицинским изделием.</p>
+{% endblock %}
