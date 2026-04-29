@@ -1,6 +1,8 @@
 import os
 import json
-from pathlib import Path
+import gc
+import requests  # ← добавили
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -9,7 +11,7 @@ from django.conf import settings
 from torch import nn
 from torchvision import models, transforms
 
-# Глобальные переменные для кэширования
+# Глобальные переменные
 _MODEL = None
 _IDX2LABEL = None
 _DEVICE = "cpu"
@@ -22,9 +24,9 @@ _CLASS_RISK = {
 
 _RISK_LABEL = {
     "red":    "🟥 Высокий риск — возможно злокачественное образование",
-    "orange": "🟧 Повышенный риск — требуется очный осмотр в ближайшее время",
-    "yellow": "🟨 Умеренный риск — желательно плановое наблюдение у врача",
-    "green":  "🟩 Низкий риск — признаки доброкачественного образования (по модели)",
+    "orange": "🟧 Повышенный риск — требуется очный осмотр",
+    "yellow": "🟨 Умеренный риск — желательно плановое наблюдение",
+    "green":  "🟩 Низкий риск — признаки доброкачественного образования",
 }
 
 _LABEL_NAME = {
@@ -32,8 +34,8 @@ _LABEL_NAME = {
     "nv":   "Меланоцитарный невус (родинка)",
     "bkl":  "Кератозоподобное образование",
     "bcc":  "Базальноклеточный рак кожи",
-    "akiec": "Актинический кератоз / болезнь Боуэна (in situ)",
-    "vasc": "Сосудистое поражение (гемангиома)",
+    "akiec": "Актинический кератоз / болезнь Боуэна",
+    "vasc": "Сосудистое поражение",
     "df":   "Дерматофиброма",
 }
 
@@ -65,15 +67,14 @@ def _load_class_map(path):
     return arr
 
 
-def _build_resnet50(num_classes: int):
-    """Создаём ResNet50 и заменяем классификатор"""
-    model = models.resnet50(weights=None)
+def _build_model(num_classes: int):
+    """Лёгкая модель — ResNet18"""
+    model = models.resnet18(weights=None)
     model.fc = nn.Linear(model.fc.in_features, num_classes)
     return model
 
 
 def _get_model():
-    """Ленивая загрузка модели + экономия памяти"""
     global _MODEL, _IDX2LABEL
 
     if _MODEL is not None:
@@ -86,35 +87,36 @@ def _get_model():
         _IDX2LABEL = _load_class_map(class_map_path)
         num_classes = len([x for x in _IDX2LABEL if x is not None])
 
-        print(">>> Загрузка модели дерматологии...")  # для логов на Render
+        print(">>> Загрузка модели дерматологии (ResNet18 + float16)...")
 
         state = torch.load(model_path, map_location=_DEVICE)
 
         if isinstance(state, dict) and not isinstance(state, nn.Module):
-            model = _build_resnet50(num_classes)
+            model = _build_model(num_classes)
             if any(k.startswith("module.") for k in state.keys()):
                 state = {k.replace("module.", "", 1): v for k, v in state.items()}
             model.load_state_dict(state, strict=False)
         else:
             model = state
 
-        # === Экономия памяти ===
-        model = model.to(dtype=torch.float16)   # Half precision
+        # Оптимизация памяти
+        model = model.to(dtype=torch.float16)
         model.eval()
 
-        _MODEL = model
-        print(">>> Модель успешно загружена (float16)")
+        gc.collect()
 
+        _MODEL = model
+        print(">>> Модель успешно загружена (ResNet18 + float16)")
         return model, _IDX2LABEL
 
     except Exception as e:
-        print(f">>> ОШИБКА загрузки модели: {e}")
+        print(f">>> КРИТИЧЕСКАЯ ОШИБКА загрузки модели: {e}")
         raise
 
 
-# Трансформации изображения
+# Трансформации
 _PRE = transforms.Compose([
-    transforms.Resize(256),
+    transforms.Resize(224),
     transforms.CenterCrop(224),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -127,7 +129,7 @@ def predict_image_topk(path: str, topk: int = 3):
     model, idx2label = _get_model()
 
     img = Image.open(path).convert("RGB")
-    x = _PRE(img).unsqueeze(0).to(dtype=torch.float16)   # тоже в half
+    x = _PRE(img).unsqueeze(0).to(dtype=torch.float16)
 
     logits = model(x)
     if isinstance(logits, (tuple, list)):
@@ -167,7 +169,6 @@ def predict_image(path: str):
     return best["label"], best["percent"]
 
 
-# Функция для генерации плана лечения (оставил без изменений)
 def get_treatment_plan(disease_name: str, risk_level: str | None = None) -> str:
     system_prompt = (
         "Ты медицинский ИИ Medora. "
