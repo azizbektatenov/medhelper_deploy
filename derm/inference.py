@@ -1,211 +1,147 @@
 import os
-import json
-import gc
+import base64
 import requests
-
-import torch
-import torch.nn.functional as F
-from PIL import Image
 from django.conf import settings
-from torch import nn
-from torchvision import models, transforms
 
-# Глобальные переменные
-_MODEL = None
-_IDX2LABEL = None
-_DEVICE = "cpu"
+# ==================== Анализ кожи через OpenRouter Vision ====================
 
-# ====================== Настройки ======================
-_CLASS_RISK = {
-    "mel": "red", "akiec": "red", "bcc": "orange",
-    "bkl": "yellow", "df": "yellow", "vasc": "yellow", "nv": "green",
-}
-
-_RISK_LABEL = {
-    "red":    "🟥 Высокий риск — возможно злокачественное образование",
-    "orange": "🟧 Повышенный риск — требуется очный осмотр",
-    "yellow": "🟨 Умеренный риск",
-    "green":  "🟩 Низкий риск",
-}
-
-_LABEL_NAME = {
-    "mel":  "Меланома",
-    "nv":   "Меланоцитарный невус (родинка)",
-    "bkl":  "Кератозоподобное образование",
-    "bcc":  "Базальноклеточный рак кожи",
-    "akiec": "Актинический кератоз",
-    "vasc": "Сосудистое поражение",
-    "df":   "Дерматофиброма",
-}
+def encode_image_to_base64(image_path: str) -> str:
+    """Преобразует изображение в base64"""
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
 
 
-def _risk_from_label(label: str):
-    if not label:
-        return "yellow", _RISK_LABEL["yellow"]
-    l = label.lower()
-    for key, lvl in _CLASS_RISK.items():
-        if key in l:
-            return lvl, _RISK_LABEL[lvl]
-    return "yellow", _RISK_LABEL["yellow"]
-
-
-def _abs(path_or_none, default_rel):
-    if path_or_none:
-        return path_or_none if os.path.isabs(path_or_none) else os.path.join(settings.BASE_DIR, path_or_none)
-    return os.path.join(settings.BASE_DIR, default_rel)
-
-
-def _load_class_map(path):
-    with open(path, "r", encoding="utf-8") as f:
-        mapping = json.load(f)
-    idx2dx = mapping.get("label_to_dx", {})
-    max_idx = max(int(k) for k in idx2dx.keys())
-    arr = [None] * (max_idx + 1)
-    for k, v in idx2dx.items():
-        arr[int(k)] = v
-    return arr
-
-
-def _build_resnet50(num_classes: int):
-    """Создаём ResNet50 с правильной структурой"""
-    model = models.resnet50(weights=None)
-    model.fc = nn.Linear(model.fc.in_features, num_classes)
-    return model
-
-
-def _get_model():
-    global _MODEL, _IDX2LABEL
-
-    if _MODEL is not None:
-        return _MODEL, _IDX2LABEL
-
+def analyze_skin_image(image_path: str):
+    """
+    Отправляет фото на OpenRouter и возвращает результат анализа.
+    Возвращает: (label, confidence, risk_level, risk_label, top_list)
+    """
     try:
-        model_path = _abs(os.getenv("MODEL_PATH"), "models/skin_model.pth")
-        class_map_path = _abs(os.getenv("CLASS_MAP_PATH"), "models/class_mapping.json")
+        base64_image = encode_image_to_base64(image_path)
 
-        _IDX2LABEL = _load_class_map(class_map_path)
-        num_classes = len([x for x in _IDX2LABEL if x is not None])
+        # Выбираем мощную vision-модель
+        model = settings.OPENROUTER_MODEL or "google/gemini-2.0-flash"   # можно поменять
 
-        print(">>> Загрузка модели дерматологии (ResNet50 + float16)...")
+        system_prompt = """
+        Ты — опытный дерматолог. Проанализируй изображение кожного образования.
+        Определи наиболее вероятный диагноз из следующих классов:
+        - mel (Меланома)
+        - nv (Меланоцитарный невус / родинка)
+        - bkl (Кератозоподобное образование)
+        - bcc (Базальноклеточный рак)
+        - akiec (Актинический кератоз)
+        - vasc (Сосудистое поражение)
+        - df (Дерматофиброма)
 
-        # Загружаем веса
-        state = torch.load(model_path, map_location=_DEVICE)
+        Верни ответ **только в формате JSON**:
+        {
+          "label": "nv",
+          "confidence": 0.87,
+          "risk_level": "green",
+          "explanation": "Краткое объяснение"
+        }
+        """
 
-        if isinstance(state, dict) and not isinstance(state, nn.Module):
-            model = _build_resnet50(num_classes)
-            if any(k.startswith("module.") for k in state.keys()):
-                state = {k.replace("module.", "", 1): v for k, v in state.items()}
-            model.load_state_dict(state, strict=False)
-        else:
-            model = state
+        user_prompt = "Проанализируй это изображение кожного образования и дай наиболее вероятный диагноз."
 
-        # === Максимальная оптимизация памяти ===
-        model = model.to(dtype=torch.float16)
-        model.eval()
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 300,
+            "temperature": 0.3,
+        }
 
-        # Очистка памяти
-        gc.collect()
+        headers = {
+            "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://medhelper-deploy.onrender.com",
+            "X-Title": "MedHelper",
+        }
 
-        _MODEL = model
-        print(">>> Модель успешно загружена (ResNet50 + float16)")
-        return model, _IDX2LABEL
+        print(">>> Отправка изображения на OpenRouter Vision...")
+
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            json=payload,
+            headers=headers,
+            timeout=45
+        )
+
+        response.raise_for_status()
+        data = response.json()
+
+        content = data["choices"][0]["message"]["content"]
+
+        # Пытаемся распарсить JSON из ответа
+        import json
+        try:
+            result = json.loads(content)
+        except:
+            # Если модель вернула не чистый JSON — берём текст
+            result = {"label": "unknown", "confidence": 0.6, "risk_level": "yellow", "explanation": content}
+
+        label = result.get("label", "unknown")
+        confidence = float(result.get("confidence", 0.6))
+        risk_level = result.get("risk_level", "yellow")
+
+        risk_labels = {
+            "red": "🟥 Высокий риск — возможно злокачественное образование",
+            "orange": "🟧 Повышенный риск — требуется очный осмотр",
+            "yellow": "🟨 Умеренный риск",
+            "green": "🟩 Низкий риск"
+        }
+
+        top_list = [{
+            "label": label,
+            "name": _get_human_name(label),
+            "confidence": confidence,
+            "percent": round(confidence * 100, 2),
+            "risk_level": risk_level,
+            "risk_label": risk_labels.get(risk_level, risk_labels["yellow"])
+        }]
+
+        return label, confidence * 100, risk_level, risk_labels.get(risk_level, ""), top_list
 
     except Exception as e:
-        print(f">>> КРИТИЧЕСКАЯ ОШИБКА загрузки модели: {e}")
-        raise
+        print(f">>> Ошибка при анализе через OpenRouter: {e}")
+        # Заглушка при ошибке
+        return "unknown", 50.0, "yellow", "Не удалось проанализировать изображение", []
 
 
-# Трансформации (минимальные)
-_PRE = transforms.Compose([
-    transforms.Resize(224),
-    transforms.CenterCrop(224),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225]),
-])
+def _get_human_name(label: str) -> str:
+    names = {
+        "mel": "Меланома",
+        "nv": "Меланоцитарный невус (родинка)",
+        "bkl": "Кератозоподобное образование",
+        "bcc": "Базальноклеточный рак кожи",
+        "akiec": "Актинический кератоз",
+        "vasc": "Сосудистое поражение",
+        "df": "Дерматофиброма",
+    }
+    return names.get(label.lower(), label)
 
 
-@torch.inference_mode()
+# Для совместимости со старым кодом
 def predict_image_topk(path: str, topk: int = 3):
-    model, idx2label = _get_model()
-
-    img = Image.open(path).convert("RGB")
-    x = _PRE(img).unsqueeze(0).to(dtype=torch.float16)
-
-    logits = model(x)
-    if isinstance(logits, (tuple, list)):
-        logits = logits[0]
-
-    probs = F.softmax(logits, dim=1)[0]
-
-    k = min(topk, probs.shape[0])
-    confs, idxs = torch.topk(probs, k)
-
-    top_list = []
-    for conf, idx in zip(confs.tolist(), idxs.tolist()):
-        label = idx2label[int(idx)]
-        risk_level, risk_label = _risk_from_label(label)
-        confidence = float(conf)
-        percent = round(confidence * 100, 2)
-        human_name = _LABEL_NAME.get(label, label)
-
-        top_list.append({
-            "label": label,
-            "name": human_name,
-            "confidence": confidence,
-            "percent": percent,
-            "risk_level": risk_level,
-            "risk_label": risk_label,
-        })
-
+    label, conf, risk_level, risk_label, top_list = analyze_skin_image(path)
     best = top_list[0] if top_list else None
     return best, top_list
 
 
-@torch.inference_mode()
 def predict_image(path: str):
-    best, _ = predict_image_topk(path, topk=3)
-    if best is None:
-        return "", 0.0
-    return best["label"], best["percent"]
-
-
-def get_treatment_plan(disease_name: str, risk_level: str | None = None) -> str:
-    system_prompt = (
-        "Ты медицинский ИИ Medora. "
-        "На основе названия дерматологического диагноза и уровня риска "
-        "составь структурированный план для пациента."
-    )
-
-    user_prompt = f"Диагноз по модели: {disease_name}.\nУровень риска: {risk_level or 'не указан'}."
-
-    headers = {
-        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "model": settings.OPENROUTER_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "max_tokens": 350,
-        "temperature": 0.3,
-    }
-
-    print(">>> CALL get_treatment_plan", disease_name, risk_level, flush=True)
-
-    try:
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            json=payload,
-            headers=headers,
-            timeout=35,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        print(">>> ERROR get_treatment_plan:", e, flush=True)
-        return "Не удалось получить план действий от AI."
+    label, conf, _, _, _ = analyze_skin_image(path)
+    return label, conf
