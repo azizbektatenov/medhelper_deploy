@@ -7,29 +7,34 @@ from .models import DermCase
 from .inference import (
     predict_image_topk,
     get_treatment_plan,
-    _LABEL_NAME,          # оставляем, так как используем в шаблоне
+    _LABEL_NAME,
 )
 
 
 def _parse_treatment_plan(text: str):
-    """
-    Разбирает текст плана лечения от LLM по номерам и заголовкам.
-    """
     res = {
         "syndrome": "",
         "diseases": "",
-        "actions": {"exam": "", "doctor": "", "treatment": ""},
+        "actions": {
+            "exam": "",
+            "doctor": "",
+            "treatment": "",
+        },
         "red_flags": "",
         "donts": "",
     }
+
+    if not text:
+        return res
+
     section = None
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
+
         if not line:
             continue
 
-        # Основные разделы
         m = re.match(r"^1\)\s*Синдром:\s*(.*)", line, re.I)
         if m:
             section = "syndrome"
@@ -59,7 +64,6 @@ def _parse_treatment_plan(text: str):
             res["donts"] = m.group(1).strip()
             continue
 
-        # Подразделы внутри "План действий"
         if section == "actions":
             m = re.match(r"^-\s*обследования:\s*(.*)", line, re.I)
             if m:
@@ -76,7 +80,6 @@ def _parse_treatment_plan(text: str):
                 res["actions"]["treatment"] = m.group(1).strip()
                 continue
 
-        # Продолжение текста в текущем разделе
         if section in ("syndrome", "diseases", "red_flags", "donts"):
             if res[section]:
                 res[section] += " " + line
@@ -89,42 +92,44 @@ def _parse_treatment_plan(text: str):
 @login_required
 def derm_form(request):
     """
-    Обработка загрузки фото кожи и анализ.
+    Загрузка фото кожи и первичный анализ через OpenRouter Vision.
+    Анализ выполняется только один раз при POST-загрузке изображения.
     """
+
     if request.method == "POST" and request.FILES.get("image"):
         img = request.FILES["image"]
 
-        # Создаём запись в базе
-        case = DermCase.objects.create(user=request.user, image=img)
+        case = DermCase.objects.create(
+            user=request.user,
+            image=img,
+        )
 
         try:
-            # Получаем предсказание (один раз вызываем topk)
             best, top_preds = predict_image_topk(case.image.path, topk=3)
 
             if best:
-                case.result_label = best["label"]
-                case.confidence = best["percent"]
-                risk_level = best["risk_level"]
-                main_name = best["name"]  # используем человекочитаемое название
+                case.result_label = best.get("label", "unknown")
+                case.confidence = best.get("percent", 0.0)
+                risk_level = best.get("risk_level", "yellow")
             else:
-                case.result_label = ""
+                case.result_label = "unknown"
                 case.confidence = 0.0
-                risk_level = None
-                main_name = "Неизвестно"
+                risk_level = "yellow"
 
-            # Генерируем план лечения через LLM
-            case.treatment_plan = get_treatment_plan(main_name, risk_level)
-
+            case.treatment_plan = get_treatment_plan(case.result_label, risk_level)
             case.save()
 
             return redirect("derm:derm_detail", pk=case.id)
 
         except Exception as e:
-            # Логируем ошибку (будет видно в логах Render)
             print(f">>> Ошибка при анализе изображения: {e}", flush=True)
-            # Можно добавить сообщение пользователю через messages framework,
-            # но для начала просто возвращаем на форму
-            return redirect("derm:derm_form")
+
+            case.result_label = "unknown"
+            case.confidence = 0.0
+            case.treatment_plan = get_treatment_plan("unknown", "yellow")
+            case.save()
+
+            return redirect("derm:derm_detail", pk=case.id)
 
     return render(request, "derm/form.html")
 
@@ -132,32 +137,70 @@ def derm_form(request):
 @login_required
 def derm_history(request):
     items = DermCase.objects.filter(user=request.user).order_by("-created_at")
-    return render(request, "derm/history.html", {"items": items})
+
+    return render(
+        request,
+        "derm/history.html",
+        {
+            "items": items,
+        },
+    )
 
 
 @login_required
 def derm_detail(request, pk):
+    """
+    Страница результата.
+    Важно: здесь НЕ вызываем predict_image_topk повторно,
+    чтобы не отправлять изображение в OpenRouter каждый раз.
+    """
+
     case = get_object_or_404(DermCase, pk=pk, user=request.user)
 
-    try:
-        best, top_preds = predict_image_topk(case.image.path, topk=3)
-    except Exception as e:
-        print(f">>> Ошибка при повторном предсказании в detail: {e}")
-        best = None
-        top_preds = []
+    main_name = _LABEL_NAME.get(case.result_label, case.result_label or "Неопределённый результат")
 
-    main_name = _LABEL_NAME.get(case.result_label, case.result_label)
-    main_conf_percent = round(float(case.confidence), 1) if case.confidence is not None else None
-
-    overall_risk = None
-    if best:
-        overall_risk = {
-            "risk_level": best["risk_level"],
-            "risk_label": best["risk_label"],
-        }
+    main_conf_percent = (
+        round(float(case.confidence), 1)
+        if case.confidence is not None
+        else 0.0
+    )
 
     treatment_plan = case.treatment_plan
     plan = _parse_treatment_plan(treatment_plan) if treatment_plan else None
+
+    risk_level = "yellow"
+
+    if treatment_plan:
+        lowered = treatment_plan.lower()
+
+        if "высокий риск" in lowered or "меланома" in lowered:
+            risk_level = "red"
+        elif "повышенный риск" in lowered or "базальноклеточный" in lowered or "актинический" in lowered:
+            risk_level = "orange"
+        elif "низкий риск" in lowered or "доброкачествен" in lowered:
+            risk_level = "green"
+
+    risk_labels = {
+        "red": "🟥 Высокий риск — требуется срочная очная консультация",
+        "orange": "🟧 Повышенный риск — требуется очный осмотр",
+        "yellow": "🟨 Умеренный риск — желательно наблюдение и консультация врача",
+        "green": "🟩 Низкий риск — вероятно доброкачественное образование",
+    }
+
+    overall_risk = {
+        "risk_level": risk_level,
+        "risk_label": risk_labels.get(risk_level, risk_labels["yellow"]),
+    }
+
+    top_preds = [
+        {
+            "label": case.result_label,
+            "name": main_name,
+            "percent": main_conf_percent,
+            "risk_level": risk_level,
+            "risk_label": overall_risk["risk_label"],
+        }
+    ]
 
     return render(
         request,
@@ -179,4 +222,5 @@ def derm_detail(request, pk):
 def derm_delete(request, pk):
     case = get_object_or_404(DermCase, pk=pk, user=request.user)
     case.delete()
+
     return redirect("derm:derm_history")
