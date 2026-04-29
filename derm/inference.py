@@ -1,7 +1,6 @@
 import os
 import json
 from pathlib import Path
-
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -9,23 +8,16 @@ from PIL import Image
 from django.conf import settings
 from torch import nn
 from torchvision import models, transforms
-import requests
 
-
-
+# Глобальные переменные для кэширования
 _MODEL = None
 _IDX2LABEL = None
 _DEVICE = "cpu"
 
-# Оценка риска
+# ====================== Настройки риска и названий ======================
 _CLASS_RISK = {
-    "mel": "red",
-    "akiec": "red",
-    "bcc": "orange",
-    "bkl": "yellow",
-    "df": "yellow",
-    "vasc": "yellow",
-    "nv": "green",
+    "mel": "red", "akiec": "red", "bcc": "orange",
+    "bkl": "yellow", "df": "yellow", "vasc": "yellow", "nv": "green",
 }
 
 _RISK_LABEL = {
@@ -35,13 +27,12 @@ _RISK_LABEL = {
     "green":  "🟩 Низкий риск — признаки доброкачественного образования (по модели)",
 }
 
-# Человекочитаемые названия
 _LABEL_NAME = {
     "mel":  "Меланома",
     "nv":   "Меланоцитарный невус (родинка)",
     "bkl":  "Кератозоподобное образование",
     "bcc":  "Базальноклеточный рак кожи",
-    "akiec":"Актинический кератоз / болезнь Боуэна (in situ)",
+    "akiec": "Актинический кератоз / болезнь Боуэна (in situ)",
     "vasc": "Сосудистое поражение (гемангиома)",
     "df":   "Дерматофиброма",
 }
@@ -50,12 +41,10 @@ _LABEL_NAME = {
 def _risk_from_label(label: str):
     if not label:
         return "yellow", _RISK_LABEL["yellow"]
-
     l = label.lower()
     for key, lvl in _CLASS_RISK.items():
         if key in l:
             return lvl, _RISK_LABEL[lvl]
-
     return "yellow", _RISK_LABEL["yellow"]
 
 
@@ -77,45 +66,59 @@ def _load_class_map(path):
 
 
 def _build_resnet50(num_classes: int):
-    m = models.resnet50(weights=None)
-    m.fc = nn.Linear(m.fc.in_features, num_classes)
-    return m
+    """Создаём ResNet50 и заменяем классификатор"""
+    model = models.resnet50(weights=None)
+    model.fc = nn.Linear(model.fc.in_features, num_classes)
+    return model
 
 
 def _get_model():
+    """Ленивая загрузка модели + экономия памяти"""
     global _MODEL, _IDX2LABEL
+
     if _MODEL is not None:
         return _MODEL, _IDX2LABEL
 
-    model_path = _abs(os.getenv("MODEL_PATH"), "models/skin_model.pth")
-    class_map_path = _abs(os.getenv("CLASS_MAP_PATH"), "models/class_mapping.json")
+    try:
+        model_path = _abs(os.getenv("MODEL_PATH"), "models/skin_model.pth")
+        class_map_path = _abs(os.getenv("CLASS_MAP_PATH"), "models/class_mapping.json")
 
-    _IDX2LABEL = _load_class_map(class_map_path)
-    num_classes = len([x for x in _IDX2LABEL if x is not None])
+        _IDX2LABEL = _load_class_map(class_map_path)
+        num_classes = len([x for x in _IDX2LABEL if x is not None])
 
-    state = torch.load(model_path, map_location=_DEVICE)
+        print(">>> Загрузка модели дерматологии...")  # для логов на Render
 
-    if isinstance(state, dict) and not isinstance(state, nn.Module):
-        model = _build_resnet50(num_classes)
-        if any(k.startswith("module.") for k in state.keys()):
-            state = {k.replace("module.", "", 1): v for k, v in state.items()}
-        model.load_state_dict(state, strict=False)
-    else:
-        model = state
+        state = torch.load(model_path, map_location=_DEVICE)
 
-    model.eval()
-    _MODEL = model
-    return model, _IDX2LABEL
+        if isinstance(state, dict) and not isinstance(state, nn.Module):
+            model = _build_resnet50(num_classes)
+            if any(k.startswith("module.") for k in state.keys()):
+                state = {k.replace("module.", "", 1): v for k, v in state.items()}
+            model.load_state_dict(state, strict=False)
+        else:
+            model = state
+
+        # === Экономия памяти ===
+        model = model.to(dtype=torch.float16)   # Half precision
+        model.eval()
+
+        _MODEL = model
+        print(">>> Модель успешно загружена (float16)")
+
+        return model, _IDX2LABEL
+
+    except Exception as e:
+        print(f">>> ОШИБКА загрузки модели: {e}")
+        raise
 
 
+# Трансформации изображения
 _PRE = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
     transforms.ToTensor(),
-    transforms.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225],
-    ),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225]),
 ])
 
 
@@ -124,7 +127,7 @@ def predict_image_topk(path: str, topk: int = 3):
     model, idx2label = _get_model()
 
     img = Image.open(path).convert("RGB")
-    x = _PRE(img).unsqueeze(0)
+    x = _PRE(img).unsqueeze(0).to(dtype=torch.float16)   # тоже в half
 
     logits = model(x)
     if isinstance(logits, (tuple, list)):
@@ -139,16 +142,15 @@ def predict_image_topk(path: str, topk: int = 3):
     for conf, idx in zip(confs.tolist(), idxs.tolist()):
         label = idx2label[int(idx)]
         risk_level, risk_label = _risk_from_label(label)
-
-        confidence = float(conf)         # 0–1
-        percent = confidence * 100.0     # 0–100
+        confidence = float(conf)
+        percent = round(confidence * 100, 2)
         human_name = _LABEL_NAME.get(label, label)
 
         top_list.append({
             "label": label,
             "name": human_name,
             "confidence": confidence,
-            "percent": round(percent, 2),
+            "percent": percent,
             "risk_level": risk_level,
             "risk_label": risk_label,
         })
@@ -159,21 +161,16 @@ def predict_image_topk(path: str, topk: int = 3):
 
 @torch.inference_mode()
 def predict_image(path: str):
-    """
-    Возвращает основной диагноз и % уверенности (0–100).
-    """
     best, _ = predict_image_topk(path, topk=3)
     if best is None:
         return "", 0.0
-    return best["label"], float(best["percent"])
+    return best["label"], best["percent"]
 
+
+# Функция для генерации плана лечения (оставил без изменений)
 def get_treatment_plan(disease_name: str, risk_level: str | None = None) -> str:
-    """
-    Делает запрос в OpenRouter и возвращает текст плана действий.
-    Вызывается ТОЛЬКО при создании нового анализа.
-    """
     system_prompt = (
-        "Ты медицинский ИИ MedHelper. "
+        "Ты медицинский ИИ Medora. "
         "На основе названия дерматологического диагноза и уровня риска "
         "составь структурированный план для пациента по схеме:\n"
         "1) Синдром: ...\n"
@@ -204,7 +201,6 @@ def get_treatment_plan(disease_name: str, risk_level: str | None = None) -> str:
         "top_p": 0.9,
     }
 
-    # 🔥 дебаг, чтобы в консоли видеть, что функция вообще вызвалась
     print(">>> CALL get_treatment_plan", disease_name, risk_level, flush=True)
 
     try:
