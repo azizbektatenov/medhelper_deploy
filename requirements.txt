@@ -6,9 +6,6 @@ whitenoise==6.8.2
 python-dotenv==1.1.1
 requests==2.32.3
 Pillow==11.2.1
-numpy==2.2.5
 dj-database-url==3.0.1
 psycopg2-binary==2.9.10
 django-widget-tweaks==1.5.0
-torch==2.11.0
-torchvision==0.26.0+cpu
