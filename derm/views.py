@@ -1,4 +1,3 @@
-# derm/views.py
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
@@ -6,33 +5,20 @@ import re
 
 from .models import DermCase
 from .inference import (
-    predict_image,
     predict_image_topk,
-    _LABEL_NAME,
     get_treatment_plan,
+    _LABEL_NAME,          # оставляем, так как используем в шаблоне
 )
 
 
 def _parse_treatment_plan(text: str):
     """
-    Разбирает текст вида:
-    1) Синдром: ...
-    2) Возможные заболевания: ...
-    3) План действий:
-       - обследования: ...
-       - к кому обратиться и когда: ...
-       - общие подходы к лечению (без названий препаратов): ...
-    4) Красные флаги: ...
-    5) Чего нельзя делать: ...
+    Разбирает текст плана лечения от LLM по номерам и заголовкам.
     """
     res = {
         "syndrome": "",
         "diseases": "",
-        "actions": {
-            "exam": "",
-            "doctor": "",
-            "treatment": "",
-        },
+        "actions": {"exam": "", "doctor": "", "treatment": ""},
         "red_flags": "",
         "donts": "",
     }
@@ -43,6 +29,7 @@ def _parse_treatment_plan(text: str):
         if not line:
             continue
 
+        # Основные разделы
         m = re.match(r"^1\)\s*Синдром:\s*(.*)", line, re.I)
         if m:
             section = "syndrome"
@@ -72,6 +59,7 @@ def _parse_treatment_plan(text: str):
             res["donts"] = m.group(1).strip()
             continue
 
+        # Подразделы внутри "План действий"
         if section == "actions":
             m = re.match(r"^-\s*обследования:\s*(.*)", line, re.I)
             if m:
@@ -88,6 +76,7 @@ def _parse_treatment_plan(text: str):
                 res["actions"]["treatment"] = m.group(1).strip()
                 continue
 
+        # Продолжение текста в текущем разделе
         if section in ("syndrome", "diseases", "red_flags", "donts"):
             if res[section]:
                 res[section] += " " + line
@@ -100,30 +89,42 @@ def _parse_treatment_plan(text: str):
 @login_required
 def derm_form(request):
     """
-    Форма загрузки изображения кожи.
-    ВАЖНО: LLM вызывается только здесь, при POST.
+    Обработка загрузки фото кожи и анализ.
     """
     if request.method == "POST" and request.FILES.get("image"):
         img = request.FILES["image"]
+
+        # Создаём запись в базе
         case = DermCase.objects.create(user=request.user, image=img)
 
-        # локальный прогноз
-        label, conf = predict_image(case.image.path)
-        case.result_label = label
-        case.confidence = conf
+        try:
+            # Получаем предсказание (один раз вызываем topk)
+            best, top_preds = predict_image_topk(case.image.path, topk=3)
 
-        # топ-3, чтобы достать риск
-        best, _ = predict_image_topk(case.image.path, topk=3)
-        risk_level = best["risk_level"] if best else None
+            if best:
+                case.result_label = best["label"]
+                case.confidence = best["percent"]
+                risk_level = best["risk_level"]
+                main_name = best["name"]  # используем человекочитаемое название
+            else:
+                case.result_label = ""
+                case.confidence = 0.0
+                risk_level = None
+                main_name = "Неизвестно"
 
-        main_name = _LABEL_NAME.get(label, label)
+            # Генерируем план лечения через LLM
+            case.treatment_plan = get_treatment_plan(main_name, risk_level)
 
-        # 🔥 один-единственный запрос в OpenRouter
-        case.treatment_plan = get_treatment_plan(main_name, risk_level)
+            case.save()
 
-        case.save()
+            return redirect("derm:derm_detail", pk=case.id)
 
-        return redirect("derm:derm_detail", pk=case.id)
+        except Exception as e:
+            # Логируем ошибку (будет видно в логах Render)
+            print(f">>> Ошибка при анализе изображения: {e}", flush=True)
+            # Можно добавить сообщение пользователю через messages framework,
+            # но для начала просто возвращаем на форму
+            return redirect("derm:derm_form")
 
     return render(request, "derm/form.html")
 
@@ -138,12 +139,15 @@ def derm_history(request):
 def derm_detail(request, pk):
     case = get_object_or_404(DermCase, pk=pk, user=request.user)
 
-    best, top_preds = predict_image_topk(case.image.path, topk=3)
+    try:
+        best, top_preds = predict_image_topk(case.image.path, topk=3)
+    except Exception as e:
+        print(f">>> Ошибка при повторном предсказании в detail: {e}")
+        best = None
+        top_preds = []
 
     main_name = _LABEL_NAME.get(case.result_label, case.result_label)
-    main_conf_percent = (
-        round(float(case.confidence), 1) if case.confidence is not None else None
-    )
+    main_conf_percent = round(float(case.confidence), 1) if case.confidence is not None else None
 
     overall_risk = None
     if best:
